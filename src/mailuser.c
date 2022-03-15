@@ -40,8 +40,6 @@ struct mail_list {
     struct mail_list *next;
 };
 
-int i = 0;
-
 /** Internal function that opens the users file list. If file has been
  *  opened before, rewinds the pointer to beginning of the file.
  * 
