@@ -30,19 +30,48 @@ void handle_client(int fd) {
 
     struct utsname my_uname;
     uname(&my_uname);
-    if (recv(fd,recvbuf,MAX_LINE_LENGTH+1,0) != -1) {
-        
+
+    // send welcome message
+    char* hostName = my_uname.nodename;
+    if (send_formatted(fd,"220 %s Simple Mail Transfer Service Ready \r\n", hostName) != -1) {
+        dlog("Welcome Message sent sucessfully \n");
+    } else {
+    dlog("Welcome Message sent unsuccesfully \n");
     }
 
+    // process HELO/EHLO
+    char *parts[MAX_LINE_LENGTH+1];
+    if (recv(fd,recvbuf,MAX_LINE_LENGTH+1,0) != -1) {
+        split(recvbuf,parts);
+    // check if the client sent HELO or EHLO
+        if (strcmp (parts[0], "HELO") == 0) {
+            send_formatted(fd,"250 %s \r\n", hostName);
+        } else if (strcmp (parts[0], "EHLO") == 0) {
+            send_formatted(fd,"250 %s greets %s \r\n", hostName, parts[1]);
+        }
+    }
 
-    printf("%s\n", recvbuf);
-  
-    /* TO BE COMPLETED BY THE STUDENT */
+    return;
 
-    // read from client
-    // switch in the message received and 
-    // create handler fo each command
-    // first messgae has to be HELO/ EHLO
+    // First step of mail transactions
+    // MAIL FROM:<reverse-path> [SP <mail-parameters> ] <CRLF>
+    // reset buffer
+    // memset(recvbuf,"", MAX_LINE_LENGTH+1);
+
+    // // VRFY
+    // char *parts[MAX_LINE_LENGTH+1];
+    // if (recv(fd,recvbuf,MAX_LINE_LENGTH+1,0) != -1) {
+    //     switch (expression)
+    //     {
+    //     case /* constant-expression */:
+    //         /* code */
+    //         break;
+        
+    //     default:
+    //         break;
+    //     }
+    // }
+
     //  MAIL FROM:<reverse-path> [SP <mail-parameters> ] <CRLF>
     // take the first <> out , find it 
     // if okay, return 250 
