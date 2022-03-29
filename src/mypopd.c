@@ -29,6 +29,24 @@ void handle_client(int fd) {
     net_buffer_t nb = nb_create(fd, MAX_LINE_LENGTH);
   
     /* TO BE COMPLETED BY THE STUDENT */
+
+    // TCP connection established: send greeting message, enter AUTHORIZATION state
+    // client identifies self, enter TRANSACTION state
+    // clent requests actions
+    // client issues QUIT command, enter UPDATE state, release resources, say goodbye
+
+    // server responds to unrecognized, unimplemented, syntactically invalid command, or command in wrong state, 
+    //      with negative status indicator ("-ERR")
+
+    // send greeting message
+    
+    if (send_formatted(fd, "+OK POP3 server ready") != -1){
+        dlog("Welcome message sent sucessfully \n");
+    } else {
+        dlog("Welcome message sent unsuccessfully \n");
+    }
   
     nb_destroy(nb);
+
+    return;
 }
