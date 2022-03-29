@@ -39,11 +39,33 @@ void handle_client(int fd) {
     //      with negative status indicator ("-ERR")
 
     // send greeting message
-    
     if (send_formatted(fd, "+OK POP3 server ready \r\n") != -1){
         dlog("Welcome message sent sucessfully \n");
     } else {
         dlog("Welcome message sent unsuccessfully \n");
+    }
+
+    // read line from socket
+    char *parts[MAX_LINE_LENGTH+1];
+    int read = nb_read_line(nb, recvbuf);
+    if (read != -1){
+        split(recvbuf, parts);
+        int size = sizeof parts / sizeof parts[0];
+        if (size > 2){
+            send_formatted(fd, "-ERR invalid arguments \r\n");
+        } else if (strcmp(parts[0], "USER") == 0){
+            // check if name in users.txt
+            if (is_valid_user(parts[1], NULL) != 0){
+                // username exists
+                send_formatted(fd, "+OK %s is a valid mailbox \r\n", parts[1]);
+            } else {
+                // username not valid
+                send_formatted(fd, "-ERR no mailbox for %s \r\n", parts[1]);
+            }
+        } else {
+            // client did not send USER message
+            send_formatted(fd, "-ERR \r\n");
+        }
     }
   
     nb_destroy(nb);
