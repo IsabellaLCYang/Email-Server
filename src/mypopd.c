@@ -40,7 +40,7 @@ void handle_client(int fd) {
 
     // send greeting message
     
-    if (send_formatted(fd, "+OK POP3 server ready") != -1){
+    if (send_formatted(fd, "+OK POP3 server ready \r\n") != -1){
         dlog("Welcome message sent sucessfully \n");
     } else {
         dlog("Welcome message sent unsuccessfully \n");
