@@ -12,11 +12,10 @@
 #define MAX_LINE_LENGTH 1024
 #define WELCOME_SENT_STATE 0
 #define HELO_EHLO_RECEIVED_STATE 1
+#define MAILED_RECEIVED_STATE 2
 #define INVALID_STATE 100
 
 static void handle_client(int fd);
-// test
-// test 2
 
 int main(int argc, char *argv[])
 {
@@ -57,7 +56,6 @@ void handle_client(int fd)
     int read = nb_read_line(nb, recvbuf);
     while ((read != -1) && (read != 0))
     {
-        // process HELO/EHLO
         char *parts[MAX_LINE_LENGTH + 1];
         split(recvbuf, parts);
         // generic commands
@@ -74,30 +72,67 @@ void handle_client(int fd)
         }
         else if (strcmp(parts[0], "VRFY") == 0)
         {
-            if (strchr(parts[1], '@') != NULL)
-            {
-                if (is_valid_user(parts[1], NULL) != 0)
-                {
-                    // username exists
-                    send_formatted(fd, "250 %s \r\n", parts[1]);
-                }
-                else
-                {
-                    send_formatted(fd, "550 no such user - %s\r\n", parts[1]);
-                }
-            } else {
-                send_formatted(fd, "550 no such user - %s\r\n", parts[1]);
-            }
+            vrfy_handler(fd, parts[1]);
         }
+        // sequential commands
         else
         {
-            // sequential commands
             switch (state)
             {
             // welcome message sent
             case 0:
                 // check if the client sent HELO or EHLO
-                welcome_state_handler(hostName, parts[0], parts[1], fd, state);
+                state = welcome_state_handler(hostName, parts[0], parts[1], fd);
+                break;
+            case 1:;
+                // helo_ehlo_state_handler();
+                if (strcmp(parts[0], "MAIL") == 0)
+                {
+                    if (parts[1] == NULL)
+                    {
+                        send_formatted(fd, "500 Invalid \r\n");
+                    }
+                    else
+                    {
+                        int contentlength = strlen(parts[1]);
+                        char *content = parts[1];
+                        char *standardized_format_checker = strstr(parts[1], "FROM:<");
+                        if ((standardized_format_checker == NULL) || (standardized_format_checker - parts[1] != 0))
+                        {
+                            send_formatted(fd, "500 Missing FROM:< at current position \r\n");
+                            break;
+                        }
+                        else
+                        {
+                            char *openning_bracket_pointer = strstr(parts[1], "<");
+                            int lengthIncludingBrackets = strlen(openning_bracket_pointer);
+                            // check if the username is empty
+                            if (lengthIncludingBrackets > 2)
+                            {
+                                // delete the ending bracket
+                                openning_bracket_pointer[lengthIncludingBrackets - 1] = '\0';
+                                // move the pointer to the start of the string instead of the opening bracket
+                                openning_bracket_pointer++;
+                                // pointer points to array containing only contents with brackets removed
+                                char *at_checker = strstr(openning_bracket_pointer, "@");
+                                // check if the content is in the form of local@domain 
+                                if ((at_checker != NULL) && (at_checker != openning_bracket_pointer))
+                                {
+                                    send_formatted(fd, "250 OK \r\n");
+                                }
+                                else
+                                {
+                                    send_formatted(fd, "501 Invalid email address \r\n");
+                                }
+                            }
+                            else
+                            {
+                                send_formatted(fd, "501 Invalid email address \r\n");
+                            }
+                        }
+                    }
+                }
+                break;
             }
         }
         read = nb_read_line(nb, recvbuf);
@@ -108,7 +143,6 @@ void handle_client(int fd)
     // reset buffer
     // memset(recvbuf,"", MAX_LINE_LENGTH+1);
 
-
     //  MAIL FROM:<reverse-path> [SP <mail-parameters> ] <CRLF>
     // take the first <> out , find it
     // if okay, return 250
@@ -117,23 +151,45 @@ void handle_client(int fd)
     return;
 }
 
-void welcome_state_handler(char *hostName, char *command, char *content, int fd, int *state)
+int vrfy_handler(int fd, char *content)
+{
+    if ((content != NULL) && (strstr(content, "@") != NULL))
+    {
+        if (is_valid_user(content, NULL) != 0)
+        {
+            // username exists
+            send_formatted(fd, "250 %s \r\n", content);
+            return 1; // valid username
+        }
+        else
+        {
+            send_formatted(fd, "550 no such user - %s\r\n", content);
+        }
+    }
+    else
+    {
+        send_formatted(fd, "501 invalid user - %s\r\n", content);
+    }
+    return 0; // invalid username
+}
+
+int welcome_state_handler(char *hostName, char *command, char *content, int fd)
 {
     // parts[0] command
     // parts[1] content
     if (strcmp(command, "HELO") == 0)
     {
         send_formatted(fd, "250 %s \r\n", hostName);
-        state = HELO_EHLO_RECEIVED_STATE;
+        return HELO_EHLO_RECEIVED_STATE;
     }
     else if (strcmp(command, "EHLO") == 0)
     {
         send_formatted(fd, "250 %s greets %s \r\n", hostName, content);
-        state = HELO_EHLO_RECEIVED_STATE;
+        return HELO_EHLO_RECEIVED_STATE;
     }
     else
     {
         send_formatted(fd, "503 Bad Sqeuence \r\n");
-        state = INVALID_STATE;
+        return INVALID_STATE;
     }
 }
