@@ -57,6 +57,16 @@ void handle_client(int fd) {
     while ((read != -1) && (read != 0) && (state != QUIT_SENT_STATE)){
         char *parts[MAX_LINE_LENGTH+1];
         split(recvbuf, parts);
+        if (strcmp(parts[0], "QUIT") == 0){
+            if (parts[1] != NULL){
+                // should have no arguments
+                send_formatted(fd, "-ERR invalid arguments \r\n");
+            } else {
+                send_formatted(fd, "+OK POP3 server signing off \r\n");
+                state = QUIT_SENT_STATE;
+                break;
+            }
+        }
         switch(state){
             case WELCOME_SENT_STATE:
                 if (strcmp(parts[0], "USER") == 0){
@@ -71,14 +81,6 @@ void handle_client(int fd) {
                     } else {
                         // username not valid
                         send_formatted(fd, "-ERR no mailbox for %s \r\n", parts[1]);
-                    }
-                } else if (strcmp(parts[0], "QUIT") == 0){
-                    if (parts[1] != NULL){
-                        // should have no arguments
-                        send_formatted(fd, "-ERR invalid arguments \r\n");
-                    } else {
-                        send_formatted(fd, "+OK POP3 server signing off \r\n");
-                        state = QUIT_SENT_STATE;
                     }
                 } else {
                     // USER or QUIT not sent, wrong command order
@@ -99,22 +101,11 @@ void handle_client(int fd) {
                         // password invalid
                         send_formatted(fd, "-ERR invalid password \r\n");
                     }
-                } else if (strcmp(parts[0], "QUIT") == 0){
-                    if (parts[1] != NULL){
-                        // should have no arguments
-                        send_formatted(fd, "-ERR invalid arguments \r\n");
-                    } else {
-                        send_formatted(fd, "+OK POP3 server signing off \r\n");
-                        state = QUIT_SENT_STATE;
-                    }
                 } else {
                     // PASS or QUIT not sent, wrong command order
                     send_formatted(fd, "-ERR need PASS \r\n");
                 }
                 break;
-        }
-        if (state == QUIT_SENT_STATE){
-            break;
         }
         read = nb_read_line(nb,recvbuf);
     }
