@@ -103,6 +103,35 @@ void handle_client(int fd) {
                     send_formatted(fd, "+OK \r\n");
                 } else if (strcmp(parts[0], "STAT") == 0){
                     send_formatted(fd, "+OK %u %zu \r\n", num_emails, emails_size);
+                } else if (strcmp(parts[0], "LIST") == 0){
+                    if (parts[1] == NULL){
+                        // multiline list all messages
+                        send_formatted(fd, "+OK %u messages (%zu octets) \r\n", num_emails, emails_size);
+                        int mail_index = 0;
+                        while (mail_index < num_emails){
+                            mail_item_t mail_item = get_mail_item(mail_list, mail_index);
+                            if (mail_item != NULL){
+                                size_t item_size = get_mail_item_size(mail_item);
+                                send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
+                            }
+                            mail_index++;
+                        }
+                        send_formatted(fd, ".\r\n");
+                    } else {
+                        // scan listing for specified message number
+                        int mail_index = atoi(parts[1]);
+                        if (mail_index > num_emails){
+                            send_formatted(fd, "-ERR no such message \r\n");
+                        } else {
+                            mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+                            if (mail_item == NULL){
+                                send_formatted(fd, "-ERR no such message \r\n");
+                            } else {
+                                size_t item_size = get_mail_item_size(mail_item);
+                                send_formatted(fd, "+OK %d %zu \r\n", mail_index, item_size);
+                            }
+                        }
+                    }
                 }
                 break;
         }
