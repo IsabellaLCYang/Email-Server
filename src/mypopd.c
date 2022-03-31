@@ -31,27 +31,16 @@ void handle_client(int fd) {
   
     char recvbuf[MAX_LINE_LENGTH + 1];
     net_buffer_t nb = nb_create(fd, MAX_LINE_LENGTH);
-    int state;
+    unsigned int state;
     char username[MAX_LINE_LENGTH];
-  
-    /* TO BE COMPLETED BY THE STUDENT */
-
-    // TCP connection established: send greeting message, enter AUTHORIZATION state
-    // client identifies self, enter TRANSACTION state
-    // clent requests actions
-    // client issues QUIT command, enter UPDATE state, release resources, say goodbye
-
-    // server responds to unrecognized, unimplemented, syntactically invalid command, or command in wrong state, 
-    //      with negative status indicator ("-ERR")
+    mail_list_t mail_list;
+    unsigned int num_emails;
+    size_t emails_size;
 
     // send greeting message
     if (send_formatted(fd, "+OK POP3 server ready \r\n") != -1){
-        dlog("Welcome message sent sucessfully \n");
         state = WELCOME_SENT_STATE;
-    } else {
-        dlog("Welcome message sent unsuccessfully \n");
     }
-
     // read line from socket
     int read = nb_read_line(nb, recvbuf);
     while ((read != -1) && (read != 0) && (state != QUIT_SENT_STATE)){
@@ -64,6 +53,7 @@ void handle_client(int fd) {
             } else {
                 send_formatted(fd, "+OK POP3 server signing off \r\n");
                 state = QUIT_SENT_STATE;
+                destroy_mail_list(mail_list);
                 break;
             }
         }
@@ -89,7 +79,6 @@ void handle_client(int fd) {
                 break;
             case USER_SENT_STATE:
                 if (strcmp(parts[0], "PASS") == 0){
-                    dlog(username);
                     if (parts[1] == NULL){
                         // no string password arg provided
                         send_formatted(fd, "-ERR invalid arguments \r\n");
@@ -104,6 +93,16 @@ void handle_client(int fd) {
                 } else {
                     // PASS or QUIT not sent, wrong command order
                     send_formatted(fd, "-ERR need PASS \r\n");
+                }
+                break;
+            case PASS_SENT_STATE:
+                mail_list = load_user_mail(username);
+                num_emails = get_mail_count(mail_list, 0);
+                emails_size = get_mail_list_size(mail_list);
+                if (strcmp(parts[0], "NOOP") == 0){
+                    send_formatted(fd, "+OK \r\n");
+                } else if (strcmp(parts[0], "STAT") == 0){
+                    send_formatted(fd, "+OK %u %zu \r\n", num_emails, emails_size);
                 }
                 break;
         }
