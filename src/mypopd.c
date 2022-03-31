@@ -28,6 +28,7 @@ int main(int argc, char *argv[]) {
 }
 
 void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list){
+    unsigned int total_num_emails = get_mail_count(mail_list, 1);
     unsigned int num_emails = get_mail_count(mail_list, 0);
     size_t emails_size = get_mail_list_size(mail_list);
     if (strcmp(command, "NOOP") == 0){
@@ -39,7 +40,7 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
             // multiline list all messages
             send_formatted(fd, "+OK %u messages (%zu octets)\r\n", num_emails, emails_size);
             int mail_index = 0;
-            while (mail_index < num_emails){
+            while (mail_index < total_num_emails){
                 mail_item_t mail_item = get_mail_item(mail_list, mail_index);
                 if (mail_item != NULL){
                     size_t item_size = get_mail_item_size(mail_item);
@@ -51,7 +52,7 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
         } else {
             // scan listing for specified message number
             int mail_index = atoi(arg);
-            if (mail_index > num_emails){
+            if (mail_index > total_num_emails){
                 send_formatted(fd, "-ERR no such message\r\n");
             } else {
                 mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
@@ -69,7 +70,7 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
             send_formatted(fd, "-ERR need message number\r\n");
         } else {
             int mail_index = atoi(arg);
-            if (mail_index > num_emails){
+            if (mail_index > total_num_emails){
                 send_formatted(fd, "-ERR no such message\r\n");
             } else {
                 mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
@@ -96,7 +97,7 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
             send_formatted(fd, "-ERR need message number\r\n");
         } else {
             int mail_index = atoi(arg);
-            if (mail_index > num_emails){
+            if (mail_index > total_num_emails){
                 send_formatted(fd, "-ERR no such message\r\n");
             } else {
                 mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
@@ -109,6 +110,23 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
             }
         }
     }
+    return;
+}
+int username_handler(int fd, char* arg, char* username){
+    if (arg == NULL){
+        // wrong number of arguments
+        send_formatted(fd, "-ERR invalid arguments\r\n");
+    } else if (is_valid_user(arg, NULL) != 0){
+        // username exists
+        send_formatted(fd, "+OK %s is a valid mailbox\r\n", arg);
+        //state = USER_SENT_STATE;
+        strcpy(username, arg);
+        return USER_SENT_STATE;
+    } else {
+        // username not valid
+        send_formatted(fd, "-ERR no mailbox for %s\r\n", arg);
+    }
+    return WELCOME_SENT_STATE;
 }
 
 void handle_client(int fd) {
@@ -129,31 +147,15 @@ void handle_client(int fd) {
         char *parts[MAX_LINE_LENGTH+1];
         split(recvbuf, parts);
         if (strcmp(parts[0], "QUIT") == 0){
-            if (parts[1] != NULL){
-                // should have no arguments
-                send_formatted(fd, "-ERR invalid arguments\r\n");
-            } else {
-                send_formatted(fd, "+OK POP3 server signing off\r\n");
-                state = QUIT_SENT_STATE;
-                destroy_mail_list(mail_list);
-                break;
-            }
+            send_formatted(fd, "+OK POP3 server signing off\r\n");
+            state = QUIT_SENT_STATE;
+            //destroy_mail_list(mail_list);
+            break;
         }
         switch(state){
             case WELCOME_SENT_STATE:
                 if (strcmp(parts[0], "USER") == 0){
-                    if ((parts[2] != NULL) || (parts[1] == NULL)){
-                        // wrong number of arguments
-                        send_formatted(fd, "-ERR invalid arguments\r\n");
-                    } else if (is_valid_user(parts[1], NULL) != 0){
-                        // username exists
-                        send_formatted(fd, "+OK %s is a valid mailbox\r\n", parts[1]);
-                        state = USER_SENT_STATE;
-                        strcpy(username, parts[1]);
-                    } else {
-                        // username not valid
-                        send_formatted(fd, "-ERR no mailbox for %s\r\n", parts[1]);
-                    }
+                    state = username_handler(fd, parts[1], username);
                 } else {
                     // USER or QUIT not sent, wrong command order
                     send_formatted(fd, "-ERR need USER name\r\n");
@@ -172,6 +174,8 @@ void handle_client(int fd) {
                         // password invalid
                         send_formatted(fd, "-ERR invalid password\r\n");
                     }
+                } else if (strcmp(parts[0], "USER") == 0){
+                    state = username_handler(fd, parts[1], username);
                 } else {
                     // PASS or QUIT not sent, wrong command order
                     send_formatted(fd, "-ERR need PASS\r\n");
@@ -186,6 +190,7 @@ void handle_client(int fd) {
     }
     close(fd);
     nb_destroy(nb);
+    destroy_mail_list(mail_list);
     exit(0);
     return;
 }
