@@ -11,6 +11,7 @@
 #define WELCOME_SENT_STATE 0
 #define USER_SENT_STATE 1
 #define PASS_SENT_STATE 2
+#define QUIT_SENT_STATE 10
 
 static void handle_client(int fd);
 
@@ -52,11 +53,11 @@ void handle_client(int fd) {
 
     // read line from socket
     int read = nb_read_line(nb, recvbuf);
-    while ((read != -1) && (read != 0)){
+    while ((read != -1) && (read != 0) && (state != QUIT_SENT_STATE)){
         char *parts[MAX_LINE_LENGTH+1];
         split(recvbuf, parts);
         switch(state){
-            case 0:
+            case WELCOME_SENT_STATE:
                 if (strcmp(parts[0], "USER") == 0){
                     if ((parts[2] != NULL) || (parts[1] == NULL)){
                         // wrong number of arguments
@@ -69,16 +70,27 @@ void handle_client(int fd) {
                         // username not valid
                         send_formatted(fd, "-ERR no mailbox for %s \r\n", parts[1]);
                     }
+                } else if (strcmp(parts[0], "QUIT") == 0){
+                    if (parts[1] != NULL){
+                        // should have no arguments
+                        send_formatted(fd, "-ERR invalid arguments \r\n");
+                    } else {
+                        send_formatted(fd, "+OK POP3 server signing off \r\n");
+                        state = QUIT_SENT_STATE;
+                    }
                 } else {
-                    // USER not sent, wrong command order
+                    // USER or QUIT not sent, wrong command order
                     send_formatted(fd, "-ERR need USER name \r\n");
                 }
                 break;
         }
+        if (state == QUIT_SENT_STATE){
+            break;
+        }
         read = nb_read_line(nb,recvbuf);
     }
-  
+    close(fd);
     nb_destroy(nb);
-
+    exit(0);
     return;
 }
