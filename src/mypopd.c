@@ -119,7 +119,6 @@ int username_handler(int fd, char* arg, char* username){
     } else if (is_valid_user(arg, NULL) != 0){
         // username exists
         send_formatted(fd, "+OK %s is a valid mailbox\r\n", arg);
-        //state = USER_SENT_STATE;
         strcpy(username, arg);
         return USER_SENT_STATE;
     } else {
@@ -127,6 +126,21 @@ int username_handler(int fd, char* arg, char* username){
         send_formatted(fd, "-ERR no mailbox for %s\r\n", arg);
     }
     return WELCOME_SENT_STATE;
+}
+
+int password_handler(int fd, char* arg, char* username){
+    if (arg == NULL){
+        // no string password arg provided
+        send_formatted(fd, "-ERR invalid arguments\r\n");
+    } else if (is_valid_user(username, arg) != 0){
+        // password valid for username
+        send_formatted(fd, "+OK maildrop ready\r\n");
+        return PASS_SENT_STATE;
+    } else {
+        // password invalid
+        send_formatted(fd, "-ERR invalid password\r\n");
+    }
+    return USER_SENT_STATE;
 }
 
 void handle_client(int fd) {
@@ -149,7 +163,7 @@ void handle_client(int fd) {
         if (strcmp(parts[0], "QUIT") == 0){
             send_formatted(fd, "+OK POP3 server signing off\r\n");
             state = QUIT_SENT_STATE;
-            //destroy_mail_list(mail_list);
+            destroy_mail_list(mail_list);
             break;
         }
         switch(state){
@@ -163,17 +177,7 @@ void handle_client(int fd) {
                 break;
             case USER_SENT_STATE:
                 if (strcmp(parts[0], "PASS") == 0){
-                    if (parts[1] == NULL){
-                        // no string password arg provided
-                        send_formatted(fd, "-ERR invalid arguments\r\n");
-                    } else if (is_valid_user(username, parts[1]) != 0){
-                        // password valid for username
-                        send_formatted(fd, "+OK maildrop ready\r\n");
-                        state = PASS_SENT_STATE;
-                    } else {
-                        // password invalid
-                        send_formatted(fd, "-ERR invalid password\r\n");
-                    }
+                    state = password_handler(fd, parts[1], username);
                 } else if (strcmp(parts[0], "USER") == 0){
                     state = username_handler(fd, parts[1], username);
                 } else {
@@ -190,7 +194,6 @@ void handle_client(int fd) {
     }
     close(fd);
     nb_destroy(nb);
-    destroy_mail_list(mail_list);
     exit(0);
     return;
 }
