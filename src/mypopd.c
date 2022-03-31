@@ -32,6 +32,7 @@ void handle_client(int fd) {
     char recvbuf[MAX_LINE_LENGTH + 1];
     net_buffer_t nb = nb_create(fd, MAX_LINE_LENGTH);
     int state;
+    char username[MAX_LINE_LENGTH];
   
     /* TO BE COMPLETED BY THE STUDENT */
 
@@ -66,6 +67,7 @@ void handle_client(int fd) {
                         // username exists
                         send_formatted(fd, "+OK %s is a valid mailbox \r\n", parts[1]);
                         state = USER_SENT_STATE;
+                        strcpy(username, parts[1]);
                     } else {
                         // username not valid
                         send_formatted(fd, "-ERR no mailbox for %s \r\n", parts[1]);
@@ -81,6 +83,33 @@ void handle_client(int fd) {
                 } else {
                     // USER or QUIT not sent, wrong command order
                     send_formatted(fd, "-ERR need USER name \r\n");
+                }
+                break;
+            case USER_SENT_STATE:
+                if (strcmp(parts[0], "PASS") == 0){
+                    dlog(username);
+                    if (parts[1] == NULL){
+                        // no string password arg provided
+                        send_formatted(fd, "-ERR invalid arguments \r\n");
+                    } else if (is_valid_user(username, parts[1]) != 0){
+                        // password valid for username
+                        send_formatted(fd, "+OK maildrop ready \r\n");
+                        state = PASS_SENT_STATE;
+                    } else {
+                        // password invalid
+                        send_formatted(fd, "-ERR invalid password \r\n");
+                    }
+                } else if (strcmp(parts[0], "QUIT") == 0){
+                    if (parts[1] != NULL){
+                        // should have no arguments
+                        send_formatted(fd, "-ERR invalid arguments \r\n");
+                    } else {
+                        send_formatted(fd, "+OK POP3 server signing off \r\n");
+                        state = QUIT_SENT_STATE;
+                    }
+                } else {
+                    // PASS or QUIT not sent, wrong command order
+                    send_formatted(fd, "-ERR need PASS \r\n");
                 }
                 break;
         }
