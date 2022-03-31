@@ -27,6 +27,45 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list){
+    unsigned int num_emails = get_mail_count(mail_list, 0);
+    size_t emails_size = get_mail_list_size(mail_list);
+    if (strcmp(command, "NOOP") == 0){
+        send_formatted(fd, "+OK \r\n");
+    } else if (strcmp(command, "STAT") == 0){
+        send_formatted(fd, "+OK %u %zu \r\n", num_emails, emails_size);
+    } else if (strcmp(command, "LIST") == 0){
+        if (arg == NULL){
+            // multiline list all messages
+            send_formatted(fd, "+OK %u messages (%zu octets) \r\n", num_emails, emails_size);
+            int mail_index = 0;
+            while (mail_index < num_emails){
+                mail_item_t mail_item = get_mail_item(mail_list, mail_index);
+                if (mail_item != NULL){
+                    size_t item_size = get_mail_item_size(mail_item);
+                    send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
+                }
+                mail_index++;
+            }
+            send_formatted(fd, ".\r\n");
+        } else {
+            // scan listing for specified message number
+            int mail_index = atoi(arg);
+            if (mail_index > num_emails){
+                send_formatted(fd, "-ERR no such message \r\n");
+            } else {
+                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+                if (mail_item == NULL){
+                    send_formatted(fd, "-ERR no such message \r\n");
+                } else {
+                    size_t item_size = get_mail_item_size(mail_item);
+                    send_formatted(fd, "+OK %d %zu \r\n", mail_index, item_size);
+                }
+            }
+        }
+    }
+}
+
 void handle_client(int fd) {
   
     char recvbuf[MAX_LINE_LENGTH + 1];
@@ -34,8 +73,6 @@ void handle_client(int fd) {
     unsigned int state;
     char username[MAX_LINE_LENGTH];
     mail_list_t mail_list;
-    unsigned int num_emails;
-    size_t emails_size;
 
     // send greeting message
     if (send_formatted(fd, "+OK POP3 server ready \r\n") != -1){
@@ -97,42 +134,7 @@ void handle_client(int fd) {
                 break;
             case PASS_SENT_STATE:
                 mail_list = load_user_mail(username);
-                num_emails = get_mail_count(mail_list, 0);
-                emails_size = get_mail_list_size(mail_list);
-                if (strcmp(parts[0], "NOOP") == 0){
-                    send_formatted(fd, "+OK \r\n");
-                } else if (strcmp(parts[0], "STAT") == 0){
-                    send_formatted(fd, "+OK %u %zu \r\n", num_emails, emails_size);
-                } else if (strcmp(parts[0], "LIST") == 0){
-                    if (parts[1] == NULL){
-                        // multiline list all messages
-                        send_formatted(fd, "+OK %u messages (%zu octets) \r\n", num_emails, emails_size);
-                        int mail_index = 0;
-                        while (mail_index < num_emails){
-                            mail_item_t mail_item = get_mail_item(mail_list, mail_index);
-                            if (mail_item != NULL){
-                                size_t item_size = get_mail_item_size(mail_item);
-                                send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
-                            }
-                            mail_index++;
-                        }
-                        send_formatted(fd, ".\r\n");
-                    } else {
-                        // scan listing for specified message number
-                        int mail_index = atoi(parts[1]);
-                        if (mail_index > num_emails){
-                            send_formatted(fd, "-ERR no such message \r\n");
-                        } else {
-                            mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
-                            if (mail_item == NULL){
-                                send_formatted(fd, "-ERR no such message \r\n");
-                            } else {
-                                size_t item_size = get_mail_item_size(mail_item);
-                                send_formatted(fd, "+OK %d %zu \r\n", mail_index, item_size);
-                            }
-                        }
-                    }
-                }
+                transaction_handler(fd, parts[0], parts[1], mail_list);
                 break;
         }
         read = nb_read_line(nb,recvbuf);
