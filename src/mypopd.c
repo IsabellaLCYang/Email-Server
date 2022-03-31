@@ -90,6 +90,24 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
                 }
             }
         }
+    } else if (strcmp(command, "DELE") == 0){
+        if (arg == NULL){
+            //missing arg
+            send_formatted(fd, "-ERR need message number\r\n");
+        } else {
+            int mail_index = atoi(arg);
+            if (mail_index > num_emails){
+                send_formatted(fd, "-ERR no such message\r\n");
+            } else {
+                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+                if (mail_item == NULL){
+                    send_formatted(fd, "-ERR message %d already deleted\r\n", mail_index);
+                } else {
+                    mark_mail_item_deleted(mail_item);
+                    send_formatted(fd, "+OK message %d deleted\r\n", mail_index);
+                }
+            }
+        }
     }
 }
 
