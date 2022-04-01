@@ -14,6 +14,7 @@
 #define HELO_EHLO_RECEIVED_STATE 1
 #define MAIL_RECEIVED_STATE 2
 #define RCPT_RECEIVED_STATE 3
+#define QUIT_RECEIVED_STATE 99
 #define INVALID_STATE 100
 
 #define FROM_REGEX "FROM:<.*>"
@@ -89,8 +90,6 @@ int vrfy_handler(int fd, char *content)
 
 int welcome_state_handler(char *hostName, char *command, char *content, int fd)
 {
-    // parts[0] command
-    // parts[1] content
     if (strcmp(command, "HELO") == 0)
     {
         send_formatted(fd, "250 %s \r\n", hostName);
@@ -104,7 +103,7 @@ int welcome_state_handler(char *hostName, char *command, char *content, int fd)
     else
     {
         send_formatted(fd, "503 Bad Sqeuence \r\n");
-        return INVALID_STATE;
+        return WELCOME_SENT_STATE;
     }
 }
 
@@ -163,56 +162,98 @@ int helo_ehlo_state_handler(char *command, char *content, int fd)
 }
 
 // src_of_invoktion : 0 if invoked from handle_client, 1 if invoked from rcpt_receoved_handler
-int mail_received_handler(char *command, char *content, int fd,int src_of_invoktion)
+int mail_received_handler(char *command, char *content, int fd, int src_of_invoktion, user_list_t *list)
 {
     if (strcmp(command, "RCPT") == 0)
     {
-        int to_match_value = regexec(&to_regex, content, 1, to_pmatch, 0);
-        if (to_match_value == 0) // match
+        if (content != NULL)
         {
-            char *email_address = isolate_email(content);
-            if (email_address != NULL)
+            int to_match_value = regexec(&to_regex, content, 1, to_pmatch, 0);
+            if ((to_match_value == 0)) // match
             {
-                int email_match_value = regexec(&email_regex, email_address, 1, email_pmatch, 0);
-                if (email_match_value == 0) // match regex
+                char *email_address = isolate_email(content);
+                if (email_address != NULL)
                 {
                     if (is_valid_user(email_address, NULL) != 0)
                     {
                         // add user to list
-                        user_list_t list = create_user_list();
-                        add_user_to_list(&list,email_address);
+                        add_user_to_list(list, email_address);
                         send_formatted(fd, "250 OK \r\n");
                         return RCPT_RECEIVED_STATE;
-                    } else {
+                    }
+                    else
+                    {
                         send_formatted(fd, "550 No such user \r\n");
                     }
-                } else {
+                }
+                else
+                {
                     send_formatted(fd, "501 Invalid email address \r\n");
                 }
+            }
+            else
+            {
+                send_formatted(fd, "500 Invalid Command\r\n");
             }
         }
         else
         {
-            send_formatted(fd, "500 Invalid \r\n");
+            send_formatted(fd, "500 Invalid Command\r\n");
         }
     }
     else
     {
         send_formatted(fd, "503 Bad Sequence \r\n");
     }
-    if (src_of_invoktion == 0) {
-    return MAIL_RECEIVED_STATE;
-    } else {
+    if (src_of_invoktion == 0)
+    {
+        return MAIL_RECEIVED_STATE;
+    }
+    else
+    {
         return RCPT_RECEIVED_STATE;
     }
 }
 
-int rcpt_received_handler(char *command, char *content, int fd) {
-     if (strcmp(command, "RCPT") == 0) {
-         mail_received_handler(command,content,fd,1);
-     } else if (strcmp(command, "DATA") == 0) {
+int rcpt_received_handler(char *command, char *content, int fd, net_buffer_t *nb, char *recvbuf, user_list_t *list)
+{
+    if (strcmp(command, "RCPT") == 0)
+    {
+        return mail_received_handler(command, content, fd, 1, list);
+    }
+    else if (strcmp(command, "DATA") == 0)
+    {
+        send_formatted(fd, "354 Start mail input; end with <CRLF>.<CRLF>");
+        int read = nb_read_line(nb, recvbuf);
+        char basefile[MAX_LINE_LENGTH + 1];
+        while ((read != -1) && (read != 0))
+        {
+            strcat(basefile, recvbuf);
+            if (strcmp(recvbuf, ".\r\n") == 0)
+            {
+                break;
+            }
+            read = nb_read_line(nb, recvbuf);
+        }
+    }
+    else
+    {
+        return RCPT_RECEIVED_STATE;
+    }
+}
 
-     }
+int rset_handler(int fd,int state, user_list_t *list) {
+        destroy_user_list(*list);
+        *list = create_user_list();
+        send_formatted(fd, "250 OK \r\n");
+            if ((state == HELO_EHLO_RECEIVED_STATE) || (state == MAIL_RECEIVED_STATE) || (state == RCPT_RECEIVED_STATE))
+            {
+                return HELO_EHLO_RECEIVED_STATE;
+            }
+            else
+            {
+                return  WELCOME_SENT_STATE;
+            }
 }
 
 void handle_client(int fd)
@@ -232,10 +273,13 @@ void handle_client(int fd)
     }
 
     regex_init();
+    user_list_t list = create_user_list();
+    char *recvbuf_pointer = recvbuf;
+    net_buffer_t *nb_pointer = nb;
 
     // read line from socket
     int read = nb_read_line(nb, recvbuf);
-    while ((read != -1) && (read != 0))
+    while ((read != -1) && (read != 0) && (state != QUIT_RECEIVED_STATE))
     {
         char *parts[MAX_LINE_LENGTH + 1];
         split(recvbuf, parts);
@@ -247,13 +291,16 @@ void handle_client(int fd)
         else if (strcmp(parts[0], "QUIT") == 0)
         {
             send_formatted(fd, "221 OK \r\n");
-            read = nb_read_line(nb, recvbuf);
+            state = QUIT_RECEIVED_STATE;
             break;
-            // close connection
         }
         else if (strcmp(parts[0], "VRFY") == 0)
         {
             vrfy_handler(fd, parts[1]);
+        }
+        else if (strcmp(parts[0], "RSET") == 0)
+        {
+            state = rset_handler(fd,state,&list);
         }
         // sequential commands
         else
@@ -269,16 +316,17 @@ void handle_client(int fd)
                 state = helo_ehlo_state_handler(parts[0], parts[1], fd);
                 break;
             case 2:;
-                state = mail_received_handler(parts[0], parts[1], fd,0);
+                state = mail_received_handler(parts[0], parts[1], fd, 0, &list);
                 break;
             case 3:;
-            break;
+                state = rcpt_received_handler(parts[0], parts[1], fd, nb_pointer, recvbuf_pointer, &list);
+                break;
             }
         }
         read = nb_read_line(nb, recvbuf);
     }
-    nb_destroy(nb);
     close(fd);
+    nb_destroy(nb);
     exit(0);
     return;
 }
