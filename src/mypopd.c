@@ -27,6 +27,125 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list){
+    unsigned int total_num_emails = get_mail_count(mail_list, 1);
+    unsigned int num_emails = get_mail_count(mail_list, 0);
+    size_t emails_size = get_mail_list_size(mail_list);
+    if (strcmp(command, "NOOP") == 0){
+        send_formatted(fd, "+OK\r\n");
+    } else if (strcmp(command, "STAT") == 0){
+        send_formatted(fd, "+OK %u %zu\r\n", num_emails, emails_size);
+    } else if (strcmp(command, "LIST") == 0){
+        if (arg == NULL){
+            // multiline list all messages
+            send_formatted(fd, "+OK %u messages (%zu octets)\r\n", num_emails, emails_size);
+            int mail_index = 0;
+            while (mail_index < total_num_emails){
+                mail_item_t mail_item = get_mail_item(mail_list, mail_index);
+                if (mail_item != NULL){
+                    size_t item_size = get_mail_item_size(mail_item);
+                    send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
+                }
+                mail_index++;
+            }
+            send_formatted(fd, ".\r\n");
+        } else {
+            // scan listing for specified message number
+            int mail_index = atoi(arg);
+            if (mail_index > total_num_emails){
+                send_formatted(fd, "-ERR no such message\r\n");
+            } else {
+                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+                if (mail_item == NULL){
+                    send_formatted(fd, "-ERR no such message\r\n");
+                } else {
+                    size_t item_size = get_mail_item_size(mail_item);
+                    send_formatted(fd, "+OK %d %zu\r\n", mail_index, item_size);
+                }
+            }
+        }
+    } else if (strcmp(command, "RETR") == 0){
+        if (arg == NULL){
+            // missing arg
+            send_formatted(fd, "-ERR need message number\r\n");
+        } else {
+            int mail_index = atoi(arg);
+            if (mail_index > total_num_emails){
+                send_formatted(fd, "-ERR no such message\r\n");
+            } else {
+                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+                if (mail_item == NULL){
+                    send_formatted(fd, "-ERR no such message\r\n");
+                } else {
+                    size_t item_size = get_mail_item_size(mail_item);
+                    FILE *mail_contents = get_mail_item_contents(mail_item);
+                    char c;
+                    send_formatted(fd, "+OK %zu octets\r\n", item_size);
+                    c = fgetc(mail_contents);
+                    while (c != EOF){
+                        send_formatted(fd, "%c", c);
+                        c = fgetc(mail_contents);
+                    }
+                    send_formatted(fd, ".\r\n");
+                    fclose(mail_contents);
+                }
+            }
+        }
+    } else if (strcmp(command, "DELE") == 0){
+        if (arg == NULL){
+            //missing arg
+            send_formatted(fd, "-ERR need message number\r\n");
+        } else {
+            int mail_index = atoi(arg);
+            if (mail_index > total_num_emails){
+                send_formatted(fd, "-ERR no such message\r\n");
+            } else {
+                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+                if (mail_item == NULL){
+                    send_formatted(fd, "-ERR message %d already deleted\r\n", mail_index);
+                } else {
+                    mark_mail_item_deleted(mail_item);
+                    send_formatted(fd, "+OK message %d deleted\r\n", mail_index);
+                }
+            }
+        }
+    } else if (strcmp(command, "RSET") == 0){
+        unsigned int recovered = reset_mail_list_deleted_flag(mail_list);
+        send_formatted(fd, "+OK %u messages restored\r\n", recovered);
+    }
+    return;
+}
+int username_handler(int fd, char* arg, char* username){
+    if (arg == NULL){
+        // wrong number of arguments
+        send_formatted(fd, "-ERR invalid arguments\r\n");
+    } else if (is_valid_user(arg, NULL) != 0){
+        // username exists
+        send_formatted(fd, "+OK %s is a valid mailbox\r\n", arg);
+        strcpy(username, arg);
+        return USER_SENT_STATE;
+    } else {
+        // username not valid
+        send_formatted(fd, "-ERR no mailbox for %s\r\n", arg);
+    }
+    return WELCOME_SENT_STATE;
+}
+
+int password_handler(int fd, char* arg, char* username){
+    if (arg == NULL){
+        // no string password arg provided
+        send_formatted(fd, "-ERR invalid arguments\r\n");
+    } else if (is_valid_user(username, arg) != 0){
+        // password valid for username
+        send_formatted(fd, "+OK maildrop ready\r\n");
+        return PASS_SENT_STATE;
+    } else {
+        // password invalid
+        send_formatted(fd, "-ERR invalid password\r\n");
+    }
+    return USER_SENT_STATE;
+}
+
 void handle_client(int fd) {
   
     char recvbuf[MAX_LINE_LENGTH + 1];
@@ -34,11 +153,9 @@ void handle_client(int fd) {
     unsigned int state;
     char username[MAX_LINE_LENGTH];
     mail_list_t mail_list;
-    unsigned int num_emails;
-    size_t emails_size;
 
     // send greeting message
-    if (send_formatted(fd, "+OK POP3 server ready \r\n") != -1){
+    if (send_formatted(fd, "+OK POP3 server ready\r\n") != -1){
         state = WELCOME_SENT_STATE;
     }
     // read line from socket
@@ -47,92 +164,33 @@ void handle_client(int fd) {
         char *parts[MAX_LINE_LENGTH+1];
         split(recvbuf, parts);
         if (strcmp(parts[0], "QUIT") == 0){
-            if (parts[1] != NULL){
-                // should have no arguments
-                send_formatted(fd, "-ERR invalid arguments \r\n");
-            } else {
-                send_formatted(fd, "+OK POP3 server signing off \r\n");
-                state = QUIT_SENT_STATE;
-                destroy_mail_list(mail_list);
-                break;
-            }
+            send_formatted(fd, "+OK POP3 server signing off\r\n");
+            state = QUIT_SENT_STATE;
+            destroy_mail_list(mail_list);
+            break;
         }
         switch(state){
             case WELCOME_SENT_STATE:
                 if (strcmp(parts[0], "USER") == 0){
-                    if ((parts[2] != NULL) || (parts[1] == NULL)){
-                        // wrong number of arguments
-                        send_formatted(fd, "-ERR invalid arguments \r\n");
-                    } else if (is_valid_user(parts[1], NULL) != 0){
-                        // username exists
-                        send_formatted(fd, "+OK %s is a valid mailbox \r\n", parts[1]);
-                        state = USER_SENT_STATE;
-                        strcpy(username, parts[1]);
-                    } else {
-                        // username not valid
-                        send_formatted(fd, "-ERR no mailbox for %s \r\n", parts[1]);
-                    }
+                    state = username_handler(fd, parts[1], username);
                 } else {
                     // USER or QUIT not sent, wrong command order
-                    send_formatted(fd, "-ERR need USER name \r\n");
+                    send_formatted(fd, "-ERR need USER name\r\n");
                 }
                 break;
             case USER_SENT_STATE:
                 if (strcmp(parts[0], "PASS") == 0){
-                    if (parts[1] == NULL){
-                        // no string password arg provided
-                        send_formatted(fd, "-ERR invalid arguments \r\n");
-                    } else if (is_valid_user(username, parts[1]) != 0){
-                        // password valid for username
-                        send_formatted(fd, "+OK maildrop ready \r\n");
-                        state = PASS_SENT_STATE;
-                    } else {
-                        // password invalid
-                        send_formatted(fd, "-ERR invalid password \r\n");
-                    }
+                    state = password_handler(fd, parts[1], username);
+                } else if (strcmp(parts[0], "USER") == 0){
+                    state = username_handler(fd, parts[1], username);
                 } else {
                     // PASS or QUIT not sent, wrong command order
-                    send_formatted(fd, "-ERR need PASS \r\n");
+                    send_formatted(fd, "-ERR need PASS\r\n");
                 }
                 break;
             case PASS_SENT_STATE:
                 mail_list = load_user_mail(username);
-                num_emails = get_mail_count(mail_list, 0);
-                emails_size = get_mail_list_size(mail_list);
-                if (strcmp(parts[0], "NOOP") == 0){
-                    send_formatted(fd, "+OK \r\n");
-                } else if (strcmp(parts[0], "STAT") == 0){
-                    send_formatted(fd, "+OK %u %zu \r\n", num_emails, emails_size);
-                } else if (strcmp(parts[0], "LIST") == 0){
-                    if (parts[1] == NULL){
-                        // multiline list all messages
-                        send_formatted(fd, "+OK %u messages (%zu octets) \r\n", num_emails, emails_size);
-                        int mail_index = 0;
-                        while (mail_index < num_emails){
-                            mail_item_t mail_item = get_mail_item(mail_list, mail_index);
-                            if (mail_item != NULL){
-                                size_t item_size = get_mail_item_size(mail_item);
-                                send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
-                            }
-                            mail_index++;
-                        }
-                        send_formatted(fd, ".\r\n");
-                    } else {
-                        // scan listing for specified message number
-                        int mail_index = atoi(parts[1]);
-                        if (mail_index > num_emails){
-                            send_formatted(fd, "-ERR no such message \r\n");
-                        } else {
-                            mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
-                            if (mail_item == NULL){
-                                send_formatted(fd, "-ERR no such message \r\n");
-                            } else {
-                                size_t item_size = get_mail_item_size(mail_item);
-                                send_formatted(fd, "+OK %d %zu \r\n", mail_index, item_size);
-                            }
-                        }
-                    }
-                }
+                transaction_handler(fd, parts[0], parts[1], mail_list);
                 break;
         }
         read = nb_read_line(nb,recvbuf);
