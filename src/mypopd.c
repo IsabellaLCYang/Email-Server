@@ -109,6 +109,9 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
                 }
             }
         }
+    } else if (strcmp(command, "RSET") == 0){
+        unsigned int recovered = reset_mail_list_deleted_flag(mail_list);
+        send_formatted(fd, "+OK %u messages restored\r\n", recovered);
     }
     return;
 }
