@@ -11,7 +11,7 @@
 #define WELCOME_SENT_STATE 0
 #define USER_SENT_STATE 1
 #define PASS_SENT_STATE 2
-#define QUIT_SENT_STATE 10
+#define QUIT_SENT_STATE 3
 
 static void handle_client(int fd);
 
@@ -158,7 +158,7 @@ void handle_client(int fd) {
     if (send_formatted(fd, "+OK POP3 server ready\r\n") != -1){
         state = WELCOME_SENT_STATE;
     }
-    // read line from socket
+    // read line from socket - keep reading until client leaves
     int read = nb_read_line(nb, recvbuf);
     while ((read != -1) && (read != 0) && (state != QUIT_SENT_STATE)){
         char *parts[MAX_LINE_LENGTH+1];
@@ -166,7 +166,6 @@ void handle_client(int fd) {
         if (strcmp(parts[0], "QUIT") == 0){
             send_formatted(fd, "+OK POP3 server signing off\r\n");
             state = QUIT_SENT_STATE;
-            destroy_mail_list(mail_list);
             break;
         }
         switch(state){
@@ -188,12 +187,28 @@ void handle_client(int fd) {
                     send_formatted(fd, "-ERR need PASS\r\n");
                 }
                 break;
-            case PASS_SENT_STATE:
-                mail_list = load_user_mail(username);
-                transaction_handler(fd, parts[0], parts[1], mail_list);
-                break;
+        }
+        if (state == PASS_SENT_STATE){
+            break;
         }
         read = nb_read_line(nb,recvbuf);
+    }
+    if (state == PASS_SENT_STATE){
+        mail_list = load_user_mail(username);
+        read = nb_read_line(nb, recvbuf);
+    }
+    while ((read != -1) && (read != 0) && (state == PASS_SENT_STATE)){
+        char *parts[MAX_LINE_LENGTH+1];
+        split(recvbuf, parts);
+        if (strcmp(parts[0], "QUIT") == 0){
+            send_formatted(fd, "+OK POP3 server signing off\r\n");
+            state = QUIT_SENT_STATE;
+            destroy_mail_list(mail_list);
+            break;
+        } else {
+            transaction_handler(fd, parts[0], parts[1], mail_list);
+        }
+        read = nb_read_line(nb, recvbuf);
     }
     close(fd);
     nb_destroy(nb);
