@@ -14,6 +14,7 @@
 #define HELO_EHLO_RECEIVED_STATE 1
 #define MAIL_RECEIVED_STATE 2
 #define RCPT_RECEIVED_STATE 3
+#define DATA_RECEIVED_STATE 4
 #define QUIT_RECEIVED_STATE 99
 #define INVALID_STATE 100
 
@@ -114,11 +115,11 @@ void regex_init()
     to_creation_value = regcomp(&to_regex, TO_REGEX, REG_EXTENDED);
     if ((from_creation_value == 0) || (email_creation_value == 0) || (to_creation_value == 0))
     {
-        dlog("Regex compiled \n");
+        dlog("Regex compiled \r\n");
     }
     else
     {
-        dlog("Regex compilation failed \n");
+        dlog("Regex compilation failed \r\n");
     }
 }
 
@@ -193,12 +194,12 @@ int mail_received_handler(char *command, char *content, int fd, int src_of_invok
             }
             else
             {
-                send_formatted(fd, "500 Invalid Command\r\n");
+                send_formatted(fd, "500 Invalid Command \r\n");
             }
         }
         else
         {
-            send_formatted(fd, "500 Invalid Command\r\n");
+            send_formatted(fd, "500 Invalid Command \r\n");
         }
     }
     else
@@ -223,18 +224,30 @@ int rcpt_received_handler(char *command, char *content, int fd, net_buffer_t *nb
     }
     else if (strcmp(command, "DATA") == 0)
     {
-        send_formatted(fd, "354 Start mail input; end with <CRLF>.<CRLF>");
-        int read = nb_read_line(nb, recvbuf);
-        char basefile[MAX_LINE_LENGTH + 1];
+        send_formatted(fd, "354 Start mail input; end with <CRLF>.<CRLF> \r\n");
+        int read = nb_read_line(*nb, recvbuf);
+        int file_size = 0;
+        char nameBuff[] = "TEMPXXXXXX";
+        int file = mkstemp(nameBuff);
         while ((read != -1) && (read != 0))
         {
-            strcat(basefile, recvbuf);
             if (strcmp(recvbuf, ".\r\n") == 0)
             {
+                lseek(file,0,SEEK_SET);
+                save_user_mail(nameBuff,*list);
+                send_formatted(fd,"250 OK \r\n");
+                unlink(nameBuff);
                 break;
+            } else {
+                if(recvbuf[0] == '.') {
+                    recvbuf++;
+                }
+                write(file,recvbuf,strlen(recvbuf));
+                file_size += strlen(recvbuf);
             }
-            read = nb_read_line(nb, recvbuf);
+            read = nb_read_line(*nb, recvbuf);
         }
+        return DATA_RECEIVED_STATE;
     }
     else
     {
@@ -242,18 +255,19 @@ int rcpt_received_handler(char *command, char *content, int fd, net_buffer_t *nb
     }
 }
 
-int rset_handler(int fd,int state, user_list_t *list) {
-        destroy_user_list(*list);
-        *list = create_user_list();
-        send_formatted(fd, "250 OK \r\n");
-            if ((state == HELO_EHLO_RECEIVED_STATE) || (state == MAIL_RECEIVED_STATE) || (state == RCPT_RECEIVED_STATE))
-            {
-                return HELO_EHLO_RECEIVED_STATE;
-            }
-            else
-            {
-                return  WELCOME_SENT_STATE;
-            }
+int rset_handler(int fd, int state, user_list_t *list)
+{
+    destroy_user_list(*list);
+    *list = create_user_list();
+    send_formatted(fd, "250 OK \r\n");
+    if ((state == HELO_EHLO_RECEIVED_STATE) || (state == MAIL_RECEIVED_STATE) || (state == RCPT_RECEIVED_STATE))
+    {
+        return HELO_EHLO_RECEIVED_STATE;
+    }
+    else
+    {
+        return WELCOME_SENT_STATE;
+    }
 }
 
 void handle_client(int fd)
@@ -274,8 +288,10 @@ void handle_client(int fd)
 
     regex_init();
     user_list_t list = create_user_list();
-    char *recvbuf_pointer = recvbuf;
-    net_buffer_t *nb_pointer = nb;
+    char *recvbuf_pointer;
+    recvbuf_pointer = &recvbuf;
+    net_buffer_t *nb_pointer;
+    nb_pointer = &nb;
 
     // read line from socket
     int read = nb_read_line(nb, recvbuf);
@@ -300,7 +316,7 @@ void handle_client(int fd)
         }
         else if (strcmp(parts[0], "RSET") == 0)
         {
-            state = rset_handler(fd,state,&list);
+            state = rset_handler(fd, state, &list);
         }
         // sequential commands
         else
@@ -308,18 +324,21 @@ void handle_client(int fd)
             switch (state)
             {
             // welcome message sent
-            case 0:
+            case WELCOME_SENT_STATE:
                 // check if the client sent HELO or EHLO
                 state = welcome_state_handler(hostName, parts[0], parts[1], fd);
                 break;
-            case 1:;
+            case HELO_EHLO_RECEIVED_STATE:;
                 state = helo_ehlo_state_handler(parts[0], parts[1], fd);
                 break;
-            case 2:;
+            case MAIL_RECEIVED_STATE:;
                 state = mail_received_handler(parts[0], parts[1], fd, 0, &list);
                 break;
-            case 3:;
+            case RCPT_RECEIVED_STATE:;
                 state = rcpt_received_handler(parts[0], parts[1], fd, nb_pointer, recvbuf_pointer, &list);
+                break;
+            default:; 
+                send_formatted(fd,"502 Unsupported command \r\n");
                 break;
             }
         }
@@ -330,3 +349,4 @@ void handle_client(int fd)
     exit(0);
     return;
 }
+
