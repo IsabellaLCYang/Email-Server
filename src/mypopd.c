@@ -27,6 +27,86 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+void list_handler(unsigned int num_emails, size_t emails_size, unsigned int total_num_emails, mail_list_t mail_list, char *arg, int fd){
+    if (arg == NULL){
+        // multiline list all messages
+        send_formatted(fd, "+OK %u messages (%zu octets)\r\n", num_emails, emails_size);
+        int mail_index = 0;
+        while (mail_index < total_num_emails){
+            mail_item_t mail_item = get_mail_item(mail_list, mail_index);
+            if (mail_item != NULL){
+                size_t item_size = get_mail_item_size(mail_item);
+                send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
+            }
+            mail_index++;
+        }
+        send_formatted(fd, ".\r\n");
+    } else {
+        // scan listing for specified message number
+        int mail_index = atoi(arg);
+        if (mail_index > total_num_emails){
+            send_formatted(fd, "-ERR no such message\r\n");
+        } else {
+            mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+            if (mail_item == NULL){
+                send_formatted(fd, "-ERR no such message\r\n");
+            } else {
+                size_t item_size = get_mail_item_size(mail_item);
+                send_formatted(fd, "+OK %d %zu\r\n", mail_index, item_size);
+            }
+        }
+    }
+}
+
+void retr_handler(unsigned int num_emails, size_t emails_size, unsigned int total_num_emails, mail_list_t mail_list, char *arg, int fd){
+    if (arg == NULL){
+        // missing arg
+        send_formatted(fd, "-ERR need message number\r\n");
+    } else {
+        int mail_index = atoi(arg);
+        if (mail_index > total_num_emails){
+            send_formatted(fd, "-ERR no such message\r\n");
+        } else {
+            mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+            if (mail_item == NULL){
+                send_formatted(fd, "-ERR no such message\r\n");
+            } else {
+                size_t item_size = get_mail_item_size(mail_item);
+                FILE *mail_contents = get_mail_item_contents(mail_item);
+                char c;
+                send_formatted(fd, "+OK %zu octets\r\n", item_size);
+                c = fgetc(mail_contents);
+                while (c != EOF){
+                    send_formatted(fd, "%c", c);
+                    c = fgetc(mail_contents);
+                }
+                send_formatted(fd, ".\r\n");
+                fclose(mail_contents);
+            }
+        }
+    }
+}
+
+void dele_handler(unsigned int num_emails, size_t emails_size, unsigned int total_num_emails, mail_list_t mail_list, char *arg, int fd){
+    if (arg == NULL){
+        //missing arg
+        send_formatted(fd, "-ERR need message number\r\n");
+    } else {
+        int mail_index = atoi(arg);
+        if (mail_index > total_num_emails){
+            send_formatted(fd, "-ERR no such message\r\n");
+        } else {
+            mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
+            if (mail_item == NULL){
+                send_formatted(fd, "-ERR message %d already deleted\r\n", mail_index);
+            } else {
+                mark_mail_item_deleted(mail_item);
+                send_formatted(fd, "+OK message %d deleted\r\n", mail_index);
+            }
+        }
+    }
+}
+
 void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list){
     unsigned int total_num_emails = get_mail_count(mail_list, 1);
     unsigned int num_emails = get_mail_count(mail_list, 0);
@@ -36,85 +116,18 @@ void transaction_handler(int fd, char *command, char *arg, mail_list_t mail_list
     } else if (strcmp(command, "STAT") == 0){
         send_formatted(fd, "+OK %u %zu\r\n", num_emails, emails_size);
     } else if (strcmp(command, "LIST") == 0){
-        if (arg == NULL){
-            // multiline list all messages
-            send_formatted(fd, "+OK %u messages (%zu octets)\r\n", num_emails, emails_size);
-            int mail_index = 0;
-            while (mail_index < total_num_emails){
-                mail_item_t mail_item = get_mail_item(mail_list, mail_index);
-                if (mail_item != NULL){
-                    size_t item_size = get_mail_item_size(mail_item);
-                    send_formatted(fd, "%d %zu\r\n", (mail_index + 1), item_size);
-                }
-                mail_index++;
-            }
-            send_formatted(fd, ".\r\n");
-        } else {
-            // scan listing for specified message number
-            int mail_index = atoi(arg);
-            if (mail_index > total_num_emails){
-                send_formatted(fd, "-ERR no such message\r\n");
-            } else {
-                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
-                if (mail_item == NULL){
-                    send_formatted(fd, "-ERR no such message\r\n");
-                } else {
-                    size_t item_size = get_mail_item_size(mail_item);
-                    send_formatted(fd, "+OK %d %zu\r\n", mail_index, item_size);
-                }
-            }
-        }
+        list_handler(num_emails, emails_size, total_num_emails, mail_list, arg, fd);
     } else if (strcmp(command, "RETR") == 0){
-        if (arg == NULL){
-            // missing arg
-            send_formatted(fd, "-ERR need message number\r\n");
-        } else {
-            int mail_index = atoi(arg);
-            if (mail_index > total_num_emails){
-                send_formatted(fd, "-ERR no such message\r\n");
-            } else {
-                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
-                if (mail_item == NULL){
-                    send_formatted(fd, "-ERR no such message\r\n");
-                } else {
-                    size_t item_size = get_mail_item_size(mail_item);
-                    FILE *mail_contents = get_mail_item_contents(mail_item);
-                    char c;
-                    send_formatted(fd, "+OK %zu octets\r\n", item_size);
-                    c = fgetc(mail_contents);
-                    while (c != EOF){
-                        send_formatted(fd, "%c", c);
-                        c = fgetc(mail_contents);
-                    }
-                    send_formatted(fd, ".\r\n");
-                    fclose(mail_contents);
-                }
-            }
-        }
+        retr_handler(num_emails, emails_size, total_num_emails, mail_list, arg, fd);
     } else if (strcmp(command, "DELE") == 0){
-        if (arg == NULL){
-            //missing arg
-            send_formatted(fd, "-ERR need message number\r\n");
-        } else {
-            int mail_index = atoi(arg);
-            if (mail_index > total_num_emails){
-                send_formatted(fd, "-ERR no such message\r\n");
-            } else {
-                mail_item_t mail_item = get_mail_item(mail_list, (mail_index - 1));
-                if (mail_item == NULL){
-                    send_formatted(fd, "-ERR message %d already deleted\r\n", mail_index);
-                } else {
-                    mark_mail_item_deleted(mail_item);
-                    send_formatted(fd, "+OK message %d deleted\r\n", mail_index);
-                }
-            }
-        }
+        dele_handler(num_emails, emails_size, total_num_emails, mail_list, arg, fd);
     } else if (strcmp(command, "RSET") == 0){
         unsigned int recovered = reset_mail_list_deleted_flag(mail_list);
         send_formatted(fd, "+OK %u messages restored\r\n", recovered);
     }
     return;
 }
+
 int username_handler(int fd, char* arg, char* username){
     if (arg == NULL){
         // wrong number of arguments
