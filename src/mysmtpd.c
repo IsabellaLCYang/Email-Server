@@ -31,7 +31,6 @@ int email_creation_value;
 regmatch_t from_pmatch[1];
 regmatch_t to_pmatch[1];
 regmatch_t email_pmatch[1];
-int state = INVALID_STATE;
 
 int state = INVALID_STATE;
 
@@ -257,17 +256,15 @@ void handle_client(int fd){
 
     // send welcome message
     char *hostName = my_uname.nodename;
-    if (send_formatted(fd, "220 %s Simple Mail Transfer Service Ready \r\n", hostName) != -1)
-    {
+    if (send_formatted(fd, "220 %s Simple Mail Transfer Service Ready \r\n", hostName) != -1){
         state = WELCOME_SENT_STATE;
     }
 
     regex_init();
     user_list_t list = create_user_list();
-    char *recvbuf_pointer;
-    recvbuf_pointer = recvbuf;
-    net_buffer_t *nb_pointer;
-    nb_pointer = &nb;
+    
+    char *recvbuf_pointer = recvbuf;
+    net_buffer_t *nb_pointer = &nb;
 
     // read line from socket
     int read = nb_read_line(nb, recvbuf);

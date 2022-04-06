@@ -159,6 +159,28 @@ int password_handler(int fd, char* arg, char* username){
     return USER_SENT_STATE;
 }
 
+int welcome_sent_handler(char* command, char* content,int fd, char* username, int state) {
+    if (strcmp(command, "USER") == 0){
+      return username_handler(fd, content, username);
+    } else {
+        // USER or QUIT not sent, wrong command order
+        send_formatted(fd, "-ERR need USER name\r\n");
+        return state;
+    }
+}
+
+int user_sent_handler(char* command, char* content,int fd, char* username, int state) {
+    if (strcmp(command, "PASS") == 0){
+        return password_handler(fd, content, username);
+        } else if (strcmp(command, "USER") == 0){
+        return username_handler(fd, content, username);
+        } else {
+            // PASS or QUIT not sent, wrong command order
+            send_formatted(fd, "-ERR need PASS\r\n");
+            return state;
+        }
+}
+
 void handle_client(int fd) {
   
     char recvbuf[MAX_LINE_LENGTH + 1];
@@ -183,22 +205,10 @@ void handle_client(int fd) {
         }
         switch(state){
             case WELCOME_SENT_STATE:
-                if (strcmp(parts[0], "USER") == 0){
-                    state = username_handler(fd, parts[1], username);
-                } else {
-                    // USER or QUIT not sent, wrong command order
-                    send_formatted(fd, "-ERR need USER name\r\n");
-                }
+                state = welcome_sent_handler(parts[0], parts[1],fd,username,state);
                 break;
             case USER_SENT_STATE:
-                if (strcmp(parts[0], "PASS") == 0){
-                    state = password_handler(fd, parts[1], username);
-                } else if (strcmp(parts[0], "USER") == 0){
-                    state = username_handler(fd, parts[1], username);
-                } else {
-                    // PASS or QUIT not sent, wrong command order
-                    send_formatted(fd, "-ERR need PASS\r\n");
-                }
+                state = user_sent_handler(parts[0], parts[1],fd,username,state);
                 break;
         }
         if (state == PASS_SENT_STATE){
@@ -228,3 +238,5 @@ void handle_client(int fd) {
     exit(0);
     return;
 }
+
+
