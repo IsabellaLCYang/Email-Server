@@ -31,6 +31,7 @@ int email_creation_value;
 regmatch_t from_pmatch[1];
 regmatch_t to_pmatch[1];
 regmatch_t email_pmatch[1];
+int state = INVALID_STATE;
 
 int state = INVALID_STATE;
 
