@@ -31,6 +31,7 @@ int email_creation_value;
 regmatch_t from_pmatch[1];
 regmatch_t to_pmatch[1];
 regmatch_t email_pmatch[1];
+
 int state = INVALID_STATE;
 
 static void handle_client(int fd);
@@ -45,6 +46,9 @@ int main(int argc, char *argv[]){
     return 0;
 }
 
+/**
+ * Separate the email part out
+ * */
 char *isolate_email(char *content){
     char *openning_bracket_pointer = strstr(content, "<");
     int lengthIncludingBrackets = strlen(openning_bracket_pointer);
@@ -61,6 +65,9 @@ char *isolate_email(char *content){
     }
 }
 
+/**
+ * Verify if the given email is valid 
+ * */
 int vrfy_handler(int fd, char *content){
     if ((content != NULL) && (strstr(content, "@") != NULL)){
         if (is_valid_user(content, NULL) != 0){
@@ -76,6 +83,9 @@ int vrfy_handler(int fd, char *content){
     return 0; // invalid username
 }
 
+/**
+ * Greet the client with according response/ error code
+ * */
 int welcome_state_handler(char *hostName, char *command, char *content, int fd){
     // handle HELO
     if (strcmp(command, "HELO") == 0){
@@ -91,8 +101,10 @@ int welcome_state_handler(char *hostName, char *command, char *content, int fd){
     }
 }
 
+/**
+ * initializes and compile all regex 
+ * */
 void regex_init(){
-    // initializes and compile all regex 
     from_creation_value = regcomp(&from_regex, FROM_REGEX, REG_EXTENDED);
     email_creation_value = regcomp(&email_regex, EMAIL_REGEX, REG_EXTENDED);
     to_creation_value = regcomp(&to_regex, TO_REGEX, REG_EXTENDED);
@@ -103,6 +115,9 @@ void regex_init(){
     }
 }
 
+/**
+ * Check validity of the message received and send error messages accordingly / advance to MAIL state after adding user to list
+ * */
 int helo_ehlo_state_handler(char *command, char *content, int fd){
     if (strcmp(command, "MAIL") == 0){
         if (content == NULL){
@@ -131,7 +146,10 @@ int helo_ehlo_state_handler(char *command, char *content, int fd){
     return HELO_EHLO_RECEIVED_STATE;
 }
 
-// src_of_invoktion : 0 if invoked from handle_client, 1 if invoked from rcpt_receoved_handler
+/**
+ * Check validity of the message received and send error messages accordingly / advance to RCPT state after adding user to list
+ * @param src_of_invoktion : 0 if invoked from handle_client, 1 if invoked from rcpt_receoved_handler
+ * */
 int mail_received_handler(char *command, char *content, int fd, int src_of_invoktion, user_list_t *list){
     if (strcmp(command, "RCPT") == 0){
         if (content != NULL) {
@@ -169,6 +187,14 @@ int mail_received_handler(char *command, char *content, int fd, int src_of_invok
     }
 }
 
+/**
+ * Check validity of the message received and send error messages accordingly
+ * If the received command is RCPT, redirect to mail_received_handler
+ * If the received command is DATA, create tempfile and write data into the file and save the mail 
+ * then advance to RCPT state after adding user to list
+ * @param nb: pointer to net buffer
+ * @param recvbuff: pointer to recvbuff
+ * */
 int rcpt_received_handler(char *command, char *content, int fd, net_buffer_t *nb, char *recvbuf, user_list_t *list){
     if (strcmp(command, "RCPT") == 0){
         return mail_received_handler(command, content, fd, 1, list);
@@ -204,12 +230,16 @@ int rcpt_received_handler(char *command, char *content, int fd, net_buffer_t *nb
     }
 }
 
+/**
+ * Delete original user list and recreate a new one and goto according sttes based on the current state
+ * */
 int rset_handler(int fd, int state, user_list_t *list){
     // delete original user list and recreate one
     destroy_user_list(*list);
     *list = create_user_list();
     send_formatted(fd, "250 OK \r\n");
-    if ((state == HELO_EHLO_RECEIVED_STATE) || (state == MAIL_RECEIVED_STATE) || (state == RCPT_RECEIVED_STATE))
+    if ((state == HELO_EHLO_RECEIVED_STATE) || (state == MAIL_RECEIVED_STATE) 
+    || (state == RCPT_RECEIVED_STATE) ||(state == DATA_RECEIVED_STATE))
     {
         return HELO_EHLO_RECEIVED_STATE;
     }else{
@@ -220,7 +250,6 @@ int rset_handler(int fd, int state, user_list_t *list){
 void handle_client(int fd){
     char recvbuf[MAX_LINE_LENGTH + 1];
     net_buffer_t nb = nb_create(fd, MAX_LINE_LENGTH);
-    // int state;
 
     struct utsname my_uname;
     uname(&my_uname);
@@ -286,3 +315,4 @@ void handle_client(int fd){
     exit(0);
     return;
 }
+
